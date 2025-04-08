@@ -323,6 +323,7 @@ class csolve:
                         combinations,
                         desc="Calculating time dependent generators")))
             generators.extend(superop)
+            del superop
         self.generators = self._reformat(generators)
 
     def _reformat(self, generators):

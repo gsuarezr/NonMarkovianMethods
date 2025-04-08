@@ -62,39 +62,7 @@ class crsolve:
     @classmethod
     def _tree_unflatten(cls,aux_data,children):
         return cls(*children,**aux_data)
-    def gamma_fa(self,bath, w, w1, t):
-        r"""
-        It describes the decay rates for the Filtered Approximation of the
-        cumulant equation
-
-        $$\gamma(\omega,\omega^\prime,t)= 2\pi t e^{i \frac{\omega^\prime
-        -\omega}{2}t}\mathrm{sinc} \left(\frac{\omega^\prime-\omega}{2}t\right)
-         \left(J(\omega^\prime) (n(\omega^\prime)+1)J(\omega) (n(\omega)+1)
-         \right)^{\frac{1}{2}}$$
-
-        Parameters
-        ----------
-
-        w : float or numpy.ndarray
-
-        w1 : float or numpy.ndarray
-
-        t : float or numpy.ndarray
-
-        Returns
-        -------
-        float or numpy.ndarray
-            It returns a value or array describing the decay between the levels
-            with energies w and w1 at time t
-
-        """
-        var = (2 * np.pi * t * np.exp(1j * (w1 - w) * t / 2)
-               * np.sinc((w1 - w) * t / (2 * np.pi))
-               * np.sqrt(bath.spectral_density(w1) * (bath.bose(w1) + 1))
-               * np.sqrt(bath.spectral_density(w) * (bath.bose(w) + 1)))
-        return var
-
-    def _gamma_(self, ν,bath, w, w1, t):
+    def _gamma_(self, nu,bath, w, w1, t):
         r"""
         It describes the Integrand of the decay rates of the cumulant equation
         for bosonic baths
@@ -118,20 +86,7 @@ class crsolve:
             with energies w and w1 at time t
 
         """
-        var = (
-            np.exp(1j * (w - w1) / 2 * t)
-            * bath.spectral_density(ν)
-            * (np.sinc((w - ν) / (2 * np.pi) * t)
-               * np.sinc((w1 - ν) / (2 * np.pi) * t))
-            * (bath.bose(ν) + 1)
-        )
-        var += (
-            np.exp(1j * (w - w1) / 2 * t)
-            * bath.spectral_density(ν)
-            * (np.sinc((w + ν) / (2 * np.pi) * t)
-               * np.sinc((w1 + ν) / (2 * np.pi) * t))
-            * bath.bose(ν)
-        )
+        var = bath.correlation_function(t-nu).real *np.exp(-1j*w1*nu+1j*w*t) 
         return var
 
     def gamma_gen(self, bath ,w, w1, t, approximated=False):
@@ -162,27 +117,33 @@ class crsolve:
         """
         if isinstance(t,type(jnp.array([2]))):
             t=np.array(t.tolist())
-        if approximated:
-            return self.gamma_fa(bath,w, w1, t)
+
         if self.matsubara:
-            if w==w1:
-                return self.decayww(bath,w,t)
-            else:
-                return self.decayww2(bath,w,w1,t)
+                return 2*self.decayww2(bath,w,w1,t).conj()
         if self.cython:
             return bath.gamma(np.real(w),np.real(w1),t,limit=self.limit)
 
         else:
-            integrals = quad_vec(
+            print("Happening")
+            integrals = lambda t1: quad_vec(
                 self._gamma_,
                 0,
-                np.Inf,
-                args=(bath,w, w1, t),
+                t,
+                args=(bath,w, w1, t1),
                 epsabs=self.eps,
                 epsrel=self.eps,
                 quadrature="gk15"
             )[0]
-            return t*t*integrals
+            integrals2=quad_vec(
+                integrals,
+                0,
+                t,
+                epsabs=self.eps,
+                epsrel=self.eps,
+                quadrature="gk15"
+            )[0]
+            return 2*integrals(t)
+            
     def jump_operators(self,Q):
         evals, all_state = self.Hsys.eigenstates()
         N=len(all_state)
@@ -224,49 +185,48 @@ class crsolve:
                 dictrem[keys] = values
         return dictrem
         
-    def decays(self,combinations,bath,approximated,t=None):
+    def decays(self,combinations,bath,t=None):
         if t is None:
             t=self.t
         rates = {}
         done = []
-        for i in tqdm(combinations, desc='Calculating Integrals ...', dynamic_ncols=True):
+        for i in combinations:
             done.append(i)
             j = (i[1], i[0])
             if (j in done) & (i != j):
                 rates[i] = np.conjugate(rates[j])
             else:
-                rates[i] = self.gamma_gen(bath,i[0], i[1], t,
-                                                approximated)
+                rates[i] = self.gamma_gen(bath,i[0], i[1], t)
         return rates
     def matrix_form(self,jumps,combinations):   
-        matrixform={}       
-        for i in tqdm(combinations, desc='Calculating the generator Matrix ...'):
-                matrixform[i]= (spre(jumps[i[1]]) * spost(jumps[i[0]].dag()) 
-                                -1*(0.5 *(spre(jumps[i[0]].dag() * jumps[i[1]]) 
-                               + spost(jumps[i[0]].dag() * jumps[i[1]]))))
-        return matrixform
+        matrixform={}  
+        lsform={}     
+        for i in combinations:
+            ada=jumps[i[0]].dag() * jumps[i[1]]
+            matrixform[i] = (
+                spre(jumps[i[1]]) * spost(jumps[i[0]].dag()) - 1 *
+                (0.5 *
+                 (spre(ada) +spost(ada)))).full()
+                # matrixform[i]= (jumps[i[1]].full() @x@jumps[i[0]].dag().full()
+                #                 -jumps[i[0]].dag().full() @ jumps[i[1]].full()@x/2
+                #                 -x/2@jumps[i[0]].dag().full() @ jumps[i[1]].full())
+            lsform[i]=(spre(ada)-spost(ada)).full()
+        return matrixform,lsform
     
-    def generator(self,t,approximated=False):
-        generators=[]
+    def generator(self,t):
         for Q,bath in zip(self.Qs,self.baths):
             jumps=self.jump_operators(Q)
             ws=list(jumps.keys())
             combinations=list(itertools.product(ws, ws))
-            matrices=self.matrix_form(jumps,combinations)
-            decays=self.decays(combinations,bath,approximated,t)
-            superop=[]
-            if self._qutip or self.cython:
-                gen = (matrices[i]*decays[i] for i in combinations)
-            else:
-                gen = (matrices[i]*(decays[i]).item() for i in combinations)
-            superop.append(sum(gen))
-            del gen
-            del matrices
-            del decays
-        generators.extend(superop)
-        return sum(generators)
+            matrices,lsform=self.matrix_form(jumps,combinations)
+            decays=self.decays(combinations,bath,t)
+            LS= self.LS(combinations,bath,t)            
+            a=[]
+            for i in combinations:
+                a.append(decays[i]* matrices[i] +lsform[i]*LS[i] )
+        return sum(a)
     
-    def evolution(self,rho0,method="BDF"):
+    def evolution(self, rho0, method="RK45"):
         r"""
         This function computes the evolution of the state $\rho(0)$
 
@@ -275,7 +235,7 @@ class crsolve:
 
         rho0 : numpy.ndarray or qutip.Qobj
             The initial state of the quantum system under consideration.
-            
+
         approximated : bool
             When False the full cumulant equation/refined weak coupling is
             computed, when True the Filtered Approximation (FA is computed),
@@ -289,53 +249,85 @@ class crsolve:
             a list containing all of the density matrices, at all timesteps of
             the evolution
         """
-        #be easility jitted
+        # be easility jitted
         # try:
         #     y0=rho0.data.flatten()
         #     y0=np.array(y0).astype(np.complex128)
         #     f=lambda t,y: np.array(self.generator(t).data)@np.array(y) #maybe this can
         # except:
-        y0=rho0.full().flatten()
-        y0=np.array(y0).astype(np.complex128)
-        f=lambda t,y: self.generator(t).full()@np.array(y) #maybe this can
+        y0 = rho0.full().flatten()
+        y0 = np.array(y0).astype(np.complex128)
+        # def f(t, y): return self.generator(
+        #     t).full()@np.array(y)  # maybe this can
 
-            
+        def f(t, y):
+            return self.generator(t) @ y
+        print("Started Solving the differential equation")
         result = solve_ivp(f, [0, self.t[-1]],
-                   y0,
-                   t_eval=self.t,method=method)
-        return result
+                           y0,
+                           t_eval=self.t, method=method)
+        n = self.Hsys.shape[0]
+        states = [result.y[:, i].reshape(n, n)
+                  for i in range(len(self.t))]
+        print("Finished Solving the differential equation")
+        return states
     
-    
-
-    def _decayww(self,bath,w,t,k=1000):
-        decay1=-(1j*bath.ckr(k)+bath.cki(k))*(1j-1j*np.exp(-t*(1j*w+bath.vk(k)))+t*(w-1j*bath.vk(k)))
-        decay1=decay1/(w-1j*bath.vk(k))**2
-        return 2*np.real(decay1)*np.pi
-    def _decayww2(self,bath,w,w1,t,k=1000):
-        mul1=(1j*bath.ckr(k)+bath.cki(k))/(w1-1j*bath.vk(k))
-        tem1=(np.exp(1j*t*(w-w1))-np.exp(-bath.vk(k)*t-1j*w1*t))/(bath.vk(k)+1j*w)
-        tem2=1j*(np.exp(1j*(w-w1)*t)-1)/(w-w1)
-        first=mul1*(tem1+tem2)
-        mul2=-(bath.ckr(k)+1j*bath.cki(k))*(1j*bath.vk(k)+(w-w1)*np.exp(-bath.vk(k)*t+1j*t*w)-
-                (w+1j*bath.vk(k))*np.exp(1j*t*(w-w1))+w1)
-        div2=(w+1j*bath.vk(k))*(w-w1)*(w1+1j*bath.vk(k))
-        secod=mul2/div2
-        return (first+secod)*np.pi
-    def decayww2(self,bath,w,w1,t,k=1000):
-        return np.array([np.sum(self._decayww2(bath,w,w1,i,k)) for i in t])
-    def decayww(self,bath,w,t,k=1000):
-        return np.array([np.sum(self._decayww(bath,w,i,k)) for i in t])
-    
+    def _decayww2(self,bath,w,w1,t):
+        cks=np.array([i.coefficient.real for i in bath.exponents])
+        vks=np.array([i.exponent for i in bath.exponents])
+        l=[]
+        for i in range(len(cks)):
+            vkr=vks[i].real
+            vki=vks[i].imag
+            ckr=cks[i].real
+            cki=cks[i].imag
+            vb=(1j*w1-vkr)
+            gamma = np.exp((1j*(w-w1))*t)/(vki**2 + vb**2)
+            # first=vkr-1j*w1
+            # second=np.exp(vb*t)*(vki*np.sin(t*vki)+(1j*w1-vkr)*np.cos(t*vki))
+            first = (ckr*vkr - cki*vki - 1j*ckr *w1)
+            second=np.exp(1j*t*w1)*(cki*vki-ckr*vkr+1j*ckr *w1)*np.cos(t*vki)*np.exp(-vkr*t)
+            third=np.exp(1j*t*w1)*(ckr*vki+cki*vkr-1j*cki *w1)*np.sin(t*vki)*np.exp(-vkr*t)
+            l.append(gamma*(first+second+third))
+        return sum(l)
+    def decayww2(self,bath,w,w1,t):
+        return self._decayww2(bath,w,w1,t)
+    def _ls(self,bath,w,w1,t):
+        cks=np.array([i.coefficient.real for i in bath.exponents])
+        vks=np.array([i.exponent for i in bath.exponents])
+        l=[]
+        for i in range(len(cks)):
+            vkr=vks[i].real
+            vki=vks[i].imag
+            ckr=cks[i].real
+            cki=cks[i].imag
+            vb=(1j*w1-vkr)
+            gamma = np.exp((1j*(w-w1))*t)/(vki**2 + vb**2)
+            first = (ckr*vki + cki*vkr - 1j*cki *w1)
+            second=-np.exp(1j*t*w1)*(ckr*vki+cki*vkr-1j*cki *w1)*np.cos(t*vki)*np.exp(-vkr*t)
+            third=np.exp(1j*t*w1)*(cki*vki-ckr*vkr-1j*ckr *w1)*np.sin(t*vki)*np.exp(-vkr*t)
+            l.append(gamma*(first+second+third))
+        return sum(l)
+    def ls(self,bath,w,w1,t):
+        return 0#2*self._ls(bath,w,w1,t).conj()
+    def LS(self, combinations, bath, t):
+        rates = {}
+        done = []
+        for i in combinations:
+            done.append(i)
+            j = (i[1], i[0])
+            if (j in done) & (i != j):
+                rates[i] = np.conjugate(rates[j])
+            else:
+                rates[i] = self.ls(bath, i[0], i[1], t)
+        return rates
 tree_util.register_pytree_node(
     crsolve,
     crsolve._tree_flatten,
     crsolve._tree_unflatten)
-# TODO Add Lamb-shift
 # TODO pictures
 # TODO better naming
-# TODO explain regularization issues
 # TODO make result object
 # TODO support Tensor Networks
-# Benchmark with the QuatumToolbox,jl based version
-# Habilitate double precision (Maybe single is good for now)
 #TODO Diffrax does not work unless one makes a pytree for Qobj apparently 
+#TODO do the analytical integral
