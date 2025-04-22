@@ -3,32 +3,21 @@ from scipy.integrate import quad_vec
 import jax.numpy as jnp
 from jax import jit
 from tqdm import tqdm
-from qutip import spre as qutip_spre
-from qutip import spost as qutip_spost
 from qutip import Qobj as qutip_Qobj
 from nmm.utils.utils import spre as jax_spre
 from nmm.utils.utils import spost as jax_spost
 from nmm.utils.utils import Qobj as jax_Qobj
 import itertools
 from collections import defaultdict
-from nmm.cumulant.cum import bath_csolve
-from multipledispatch import dispatch
 import warnings
 from jax import  tree_util
 from scipy.integrate import solve_ivp
 
 
-@dispatch(qutip_Qobj)
-def spre(op):
-    return qutip_spre(op)
-@dispatch(qutip_Qobj)
-def spost(op):
-    return qutip_spost(op)
 
-@dispatch(jax_Qobj)
 def spre(op):
     return jax_spre(op)
-@dispatch(jax_Qobj)
+
 def spost(op):
     return jax_spost(op)
 
@@ -41,16 +30,10 @@ class crsolve:
         self.eps = eps
         self.limit=limit
         self.dtype = Hsys.dtype
-        
-        
-        if isinstance(Hsys,qutip_Qobj):
-            self._qutip=True
-        else:
-            self._qutip=False
- 
         self.baths=baths
         self.Qs = Qs
         self.matsubara=matsubara
+        
     def _tree_flatten(self):
         children=(self.Hsys,self.t,self.eps,self.limit,self.baths,self.dtype)
         aux_data={}
@@ -85,7 +68,7 @@ class crsolve:
         var = bath.correlation_function(t-nu) *np.exp(1j*w1*t-1j*w*nu) 
         return var
 
-    def gamma_gen(self, bath ,w, w1, t, approximated=False):
+    def gamma_gen(self, bath ,w, w1, t):
         r"""
         It describes the the decay rates of the cumulant equation
         for bosonic baths
@@ -129,11 +112,8 @@ class crsolve:
             )[0]
             return integrals(t)
             
-    def jump_operators(self,Q,t):
-        try:
-            evals, all_state = self.Hsys(t).eigenstates()
-        except:
-            evals, all_state = self.Hsys.eigenstates()
+    def jump_operators(self,Q):
+        evals, all_state = self.Hsys.eigenstates()
         N=len(all_state)
         collapse_list = []
         ws = []
@@ -221,11 +201,8 @@ class crsolve:
                 # post=self.gamma_gen(bath,i[1],i[0],t)*dos
                 a.append( working )  
             kk=  sum(a)
-            try:
-                return 1j*(spre(self.Hsys(t))-spost(self.Hsys(t))) +kk.conj()
-            except:
-                return kk.conj()
-
+            return 1j*(spre(self.Hsys(t))-spost(self.Hsys(t))) +kk.conj()
+    
     def evolution(self, rho0, method="RK45"):
         r"""
         This function computes the evolution of the state $\rho(0)$

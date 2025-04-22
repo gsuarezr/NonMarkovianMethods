@@ -1,72 +1,106 @@
 import jax.numpy as jnp
 from jax.scipy.linalg import expm
 from numbers import Number
-from jax import  tree_util
+from jax import tree_util
 from jax import jit
+import functools # Import functools for partial
 
 class Qobj:
-    def __init__(self,op:jnp.array):
-        self.data=op
-        self.shape=op.shape
-        self.dtype=op.dtype
+    def __init__(self, op: jnp.array):
+        self.data = op
+        # Store shape/dtype in aux_data if they are truly static
+        # For now, deriving them on the fly is fine.
+        self.shape = op.shape
+        self.dtype = op.dtype
+
     def _tree_flatten(self):
-        children=(self.data,)
-        aux_data={}
-        return (children,aux_data)
+        children = (self.data,)
+        # aux_data could potentially store shape/dtype if they
+        # are guaranteed *not* to change in ways JAX can't track.
+        # For simple cases, leaving it empty is fine.
+        aux_data = {}
+        return (children, aux_data)
+
     @classmethod
-    def _tree_unflatten(cls,aux_data,children):
-        return cls(*children,**aux_data)
-    def __eq__(self,other):
-        return jnp.isclose(self.data,other.data).all().item()
-    def __add__(self,other):
-        if isinstance(other,Qobj):
-            return Qobj(self.data+other.data)
-        if other==0:
+    def _tree_unflatten(cls, aux_data, children):
+        return cls(*children, **aux_data)
+
+    # --- JIT-able Methods ---
+
+    @functools.partial(jit, static_argnums=(0,)) # 'self' is not static here
+    def __add__(self, other):
+        # Note: Jitting dunder methods can sometimes be tricky depending on
+        # how Python dispatches them. Explicit external functions often safer.
+        if isinstance(other, Qobj):
+            return Qobj(self.data + other.data)
+        if other == 0: # Be careful comparing JAX arrays with == inside JIT
             return self
         else:
+            # Raising errors inside JIT can be problematic.
+            # Consider validity checks outside JITted code if possible.
             raise TypeError(f"Not Implemented for {type(other)}")
-    def __radd__(self,other):
-        return self.__add__(other)
-    def __sub__(self,other):
-        if isinstance(other,Qobj):
-            return Qobj(self.data-other.data)
-        if other==0:
-            return self
-        else:
-            raise TypeError(f"Not Implemented for {type(other)}")
-    def __rsub__(self,other):
-            return -1*self.__sub__(other)
+
+    @functools.partial(jit, static_argnums=(0,))
+    def __sub__(self, other):
+         if isinstance(other, Qobj):
+             return Qobj(self.data - other.data)
+         if other == 0:
+             return self
+         else:
+             raise TypeError(f"Not Implemented for {type(other)}")
+
+    @jit # No static args needed if only operating on self.data
     def dag(self):
         return Qobj(jnp.conjugate(jnp.transpose(self.data)))
+
+    # Jitting __mul__ can be complex due to the type check inside.
+    # Often better to have separate functions for scalar/matrix mult.
+    def __mul__(self, other):
+        if isinstance(other, Number):
+            return Qobj(self.data * other)
+        elif isinstance(other, Qobj):
+             return Qobj(self.data @ other.data)
+        else:
+             raise TypeError(f"Multiplication not defined for {type(other)}")
+
+
+    @functools.partial(jit, static_argnums=(0,))
+    def __truediv__(self, other):
+         if isinstance(other, Number):
+             return Qobj(self.data / other)
+         else:
+             raise NotImplementedError("Ill defined Operation")
+
+    @jit
+    def expm(self):
+        return Qobj(expm(self.data))
+
+    # --- Methods less suitable for JIT or needing care ---
+
+    # 1. __eq__: Uses .item(), which forces synchronization and breaks tracing.
+    #    If needed inside JIT, return the JAX boolean array directly.
+    def __eq__(self, other):
+         # This version is OK *outside* JIT, but not *inside* a JITted function.
+         # return jnp.allclose(self.data, other.data) # JIT-friendly version
+         return jnp.isclose(self.data, other.data).all().item()
+
+    @jit
+    def eigenstates(self):
+         eigvals, eigvecs= jnp.linalg.eigh(self.data)
+         #eigvecs = [Qobj(eigvecs_matrix[:, i:i+1]) for i in range(eigvecs_matrix.shape[1])]
+         return eigvals, eigvecs
+
+    # --- Non-computational methods (don't JIT) ---
     def __str__(self):
-        s=f"Operator: \n {self.data}"
+        s = f"Operator: \n {self.data}"
         return s
+
     def __repr__(self):
         return self.__str__()
     
-    def eigenstates(self):
-        eigvals,eigvecs=jnp.linalg.eigh(self.data)
-        eigvals=eigvals
-        eigvecs = [eigvecs[:,i] for i in range(len(eigvecs))]
-        eigvecs = [i.reshape((len(i), 1)) for i in eigvecs]
-        eigvecs=[Qobj(i) for i in eigvecs]
-        return eigvals,eigvecs
-   
-    def __mul__(self,other):
-        if (isinstance(other,Number)):
-            return Qobj(self.data*other)
-        return Qobj(self.data @ other.data)
-    def __truediv__(self,other):
-        if (isinstance(other,Number)):
-            return Qobj(self.data/other)
-        else:
-            raise NotImplementedError("Ill defined Operation")
-            
-    def __rmul__(self,other):
-        if (isinstance(other,Number)):
-            return Qobj(self.data * other)    
-    def expm(self):
-        return Qobj(expm(self.data))
+    def __getitem__(self, key):
+        indexed_data = self.data[key]
+        return Qobj(indexed_data)
 class spre:
     def __init__(self, op,kron=True):
         self.kron=kron

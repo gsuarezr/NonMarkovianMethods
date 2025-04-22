@@ -3,3 +3,4 @@ sys.path.insert(0, os.path.abspath(".."))
 from nmm.cumulant.cumulant import csolve
 from nmm.cumulant.cum import bath_csolve
 from nmm.cumulant.refined import crsolve
+from nmm.cumulant.cumulant2 import csolve2

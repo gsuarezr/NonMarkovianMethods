@@ -40,12 +40,12 @@ def spost(op):
 
 class redfield:
     def __init__(self, Hsys, t, baths, Qs, eps=1e-4, matsubara=True,
-                 points=1000,ls=False):
-        self.points = points
+                 ls=True,picture="I"):
         self.Hsys = Hsys
         self.t = t
         self.eps = eps
         self.ls=ls
+        self.picture = picture
         if isinstance(Hsys, qutip_Qobj):
             self._qutip = True
         else:
@@ -163,7 +163,11 @@ class redfield:
             epsrel=self.eps,
             quadrature="gk15"
         )[0]
-        return integrals #np.exp(1j*(w-w1)*t) remove rotation 
+        if self.picture=="I":
+            return integrals *np.exp(1j*(w-w1)*t) #
+        else:
+            return integrals
+    #remove rotation 
     #so that it is in the schrodinger picture
 
     def jump_operators(self, Q):
@@ -290,7 +294,10 @@ class redfield:
             del matrices
             del decays
         generate = sum(generators)
-        self.generators = [i+1j*(spre(self.Hsys)-spost(self.Hsys)) for i in generate]
+        if self.picture=="I":
+            self.generators = generate
+        else:
+            self.generators=[i+1j*(spre(self.Hsys)-spost(self.Hsys)) for i in generate]
 
     def evolution(self, rho0, method="RK45"):
         r"""
@@ -362,7 +369,10 @@ class redfield:
             term1*=(1-np.exp(-(vks[i]-1j*w1)*t))
             term2*=(1-np.exp(-(np.conjugate(vks[i])+1j*w)*t))
             result.append(term1+term2)
-        return sum(result) # now in schrodinger np.exp(1j*(w-w1)*t)
+        if self.picture=="I":
+            return sum(result) *np.exp(1j*(w-w1)*t)
+        else:
+            return sum(result)#now in schrodinger
 
     def _decayww(self, bath, w, t):
         return self._decayww2(bath, w, w, t)
@@ -383,7 +393,10 @@ class redfield:
             term1*=(1-np.exp(-(vks[i]-1j*w1)*t))
             term2*=(1-np.exp(-(np.conjugate(vks[i])+1j*w)*t))
             result.append(term2-term1)
-        return -sum(result)/2j  #np.exp(1j*(w-w1)*t)* now in schrodinger
+        if self.picture=="I":
+            return -sum(result)/2j *np.exp(1j*(w-w1)*t)
+        else:
+            return -sum(result)/2j#now in schrodinger
     def LS(self, combinations, bath, t):
         rates = {}
         done = []
