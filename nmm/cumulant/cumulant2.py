@@ -167,20 +167,42 @@ class csolve2:
                 return self.decayww(bath, w, t)
             else:
                 return self.decayww2(bath, w, w1, t)
- 
-
         else:
-            integrals = quad_vec(
-                self._gamma_,
-                0,
-                np.inf,
-                args=(bath, w, w1, t),
-                epsabs=self.eps,
-                epsrel=self.eps,
-                quadrature="gk21"
-            )[0]
-            return t*t*integrals
+            integrals = lambda t1: quad_vec(self._gamma_,0,t,
+                                            args=(bath,w, w1, t1),
+                                            epsabs=self.eps,
+                                            epsrel=self.eps,
+                                            quadrature="gk15")[0]
+            integrals2=quad_vec(integrals,0,t,epsabs=self.eps,epsrel=self.eps,
+                                quadrature="gk15")[0]
+            return integrals2
+        
+    def _gamma_2(self, nu,bath, w, w1, t):
+        r"""
+        It describes the Integrand of the decay rates of the cumulant equation
+        for bosonic baths
 
+        $$\Gamma(w,w',t)=\int_{0}^{t} dt_1 \int_{0}^{t} dt_2
+        e^{i (w t_1 - w' t_2)} \mathcal{C}(t_{1},t_{2})$$
+
+        Parameters:
+        ----------
+
+        w: float or numpy.ndarray
+
+        w1: float or numpy.ndarray
+
+        t: float or numpy.ndarray
+
+        Returns:
+        --------
+        float or numpy.ndarray
+            It returns a value or array describing the decay between the levels
+            with energies w and w1 at time t
+
+        """
+        var = bath.correlation_function(t-nu) *np.exp(2j*(np.sign(w)*self.f(nu)+ np.sign(w1)*self.f(t))) 
+        return var
     def sparsify(self, vectors, tol=10):
         dims = vectors[0].dims
         new = []
@@ -192,6 +214,11 @@ class csolve2:
 
             new.append(vector)
         return new
+    
+    def f(self,s):
+        wd=0.3141592653589793
+        delta=6.283185307179586
+        return (delta/(2*wd))*(1-np.cos(wd*s))
 
     def jump_operators(self, Q,t=None):
         try:

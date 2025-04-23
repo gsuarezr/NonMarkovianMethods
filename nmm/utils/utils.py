@@ -2,7 +2,7 @@ import jax.numpy as jnp
 from jax.scipy.linalg import expm
 from numbers import Number
 from jax import tree_util
-from jax import jit
+from jax import jit,Array
 import functools # Import functools for partial
 
 class Qobj:
@@ -27,20 +27,23 @@ class Qobj:
 
     # --- JIT-able Methods ---
 
-    @functools.partial(jit, static_argnums=(0,)) # 'self' is not static here
     def __add__(self, other):
-        # Note: Jitting dunder methods can sometimes be tricky depending on
-        # how Python dispatches them. Explicit external functions often safer.
+
         if isinstance(other, Qobj):
             return Qobj(self.data + other.data)
-        if other == 0: # Be careful comparing JAX arrays with == inside JIT
+        if other == 0: 
             return self
         else:
-            # Raising errors inside JIT can be problematic.
-            # Consider validity checks outside JITted code if possible.
+            raise TypeError(f"Not Implemented for {type(other)}")
+        
+    def __radd__(self, other):
+        if isinstance(other, Qobj):
+            return Qobj(self.data + other.data)
+        if other == 0: 
+            return self
+        else:
             raise TypeError(f"Not Implemented for {type(other)}")
 
-    @functools.partial(jit, static_argnums=(0,))
     def __sub__(self, other):
          if isinstance(other, Qobj):
              return Qobj(self.data - other.data)
@@ -53,18 +56,19 @@ class Qobj:
     def dag(self):
         return Qobj(jnp.conjugate(jnp.transpose(self.data)))
 
-    # Jitting __mul__ can be complex due to the type check inside.
-    # Often better to have separate functions for scalar/matrix mult.
+  
     def __mul__(self, other):
         if isinstance(other, Number):
             return Qobj(self.data * other)
+        elif isinstance(other, Array):
+            return Qobj(self.data * other)
         elif isinstance(other, Qobj):
-             return Qobj(self.data @ other.data)
+            return Qobj(self.data @ other.data)
+
         else:
              raise TypeError(f"Multiplication not defined for {type(other)}")
 
 
-    @functools.partial(jit, static_argnums=(0,))
     def __truediv__(self, other):
          if isinstance(other, Number):
              return Qobj(self.data / other)
@@ -74,23 +78,15 @@ class Qobj:
     @jit
     def expm(self):
         return Qobj(expm(self.data))
-
-    # --- Methods less suitable for JIT or needing care ---
-
-    # 1. __eq__: Uses .item(), which forces synchronization and breaks tracing.
-    #    If needed inside JIT, return the JAX boolean array directly.
-    def __eq__(self, other):
-         # This version is OK *outside* JIT, but not *inside* a JITted function.
-         # return jnp.allclose(self.data, other.data) # JIT-friendly version
-         return jnp.isclose(self.data, other.data).all().item()
-
     @jit
     def eigenstates(self):
          eigvals, eigvecs= jnp.linalg.eigh(self.data)
          #eigvecs = [Qobj(eigvecs_matrix[:, i:i+1]) for i in range(eigvecs_matrix.shape[1])]
-         return eigvals, eigvecs
+         return eigvals, Qobj(eigvecs)
 
-    # --- Non-computational methods (don't JIT) ---
+    def __eq__(self, other):
+         return jnp.isclose(self.data, other.data).all().item()
+
     def __str__(self):
         s = f"Operator: \n {self.data}"
         return s
@@ -152,17 +148,23 @@ class spre:
             raise TypeError
 
     def __mul__(self, other):
-        if type(other) in (int, float, complex, jnp.complex128):
+        if type(other) in (int, float, complex):
+            data =self.data* other
+            return spre(data,kron=False)
+        if isinstance(other,Array):
             data =self.data* other
             return spre(data,kron=False)
         data = self.data @ other.data
         return spre(data,kron=False)
 
     def __rmul__(self,other):
-        if type(other) in (int, float, complex, jnp.complex128):
+        if type(other) in (int, float, complex):
             data =self.data* other
             return spre(data,kron=False)
-
+        if isinstance(other,Array):
+            data =self.data* other
+            return spre(data,kron=False)
+        
     def __truediv__(self,other):
         if (isinstance(other,Number)):
             data=self.data/other
