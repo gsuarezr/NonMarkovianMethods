@@ -35,12 +35,13 @@ def spost(op):
 
 class crsolve:
     def __init__(self, Hsys, t, baths,Qs, eps=1e-4,limit=50,
-                 matsubara=False):
+                 matsubara=False,ls=False):
         self.Hsys = Hsys
         self.t = t
         self.eps = eps
         self.limit=limit
         self.dtype = Hsys.dtype
+        self.ls =ls
         
         
         if isinstance(Hsys,qutip_Qobj):
@@ -129,11 +130,11 @@ class crsolve:
             )[0]
             return integrals(t)
             
-    def jump_operators(self,Q,t):
-        try:
-            evals, all_state = self.Hsys(t).eigenstates()
-        except:
-            evals, all_state = self.Hsys.eigenstates()
+    def jump_operators(self,Q):
+        #try:
+            #evals, all_state = self.Hsys(t).eigenstates()
+        #except:
+        evals, all_state = self.Hsys.eigenstates()
         N=len(all_state)
         collapse_list = []
         ws = []
@@ -199,28 +200,43 @@ class crsolve:
             #     #                 -jumps[i[0]].dag().full() @ jumps[i[1]].full()@x/2
             #     #                 -x/2@jumps[i[0]].dag().full() @ jumps[i[1]].full())
             # lsform[i]=(spre(ada)-spost(ada)).full()
-            matrixform[i] =-( spre(jumps[i[1]].dag()*jumps[i[0]]) 
-                            - spre(jumps[i[0]])* spost(jumps[i[1]].dag()) )
-            lsform[i] =   -( spost(jumps[i[0]].dag()*jumps[i[1]]) 
+            #matrixform[i] =-( spre(jumps[i[1]].dag()*jumps[i[0]]) 
+            #                - spre(jumps[i[0]])* spost(jumps[i[1]].dag()) )
+            #lsform[i] =   -( spost(jumps[i[0]].dag()*jumps[i[1]]) 
+            #                - spre(jumps[i[1]])* spost(jumps[i[0]].dag()) )
+            uno=jumps[i[1]].dag()*jumps[i[0]]
+            dos=jumps[i[0]].dag()*jumps[i[1]]
+            matrixform[i] =-( spre(uno)+spost(dos) 
+                            - spre(jumps[i[0]])* spost(jumps[i[1]].dag()) 
                             - spre(jumps[i[1]])* spost(jumps[i[0]].dag()) )
+            if self.ls==True:
+                lsform[i]=-( spre(uno)-spost(dos) 
+                            - spre(jumps[i[0]])* spost(jumps[i[1]].dag()) 
+                            + spre(jumps[i[1]])* spost(jumps[i[0]].dag()) )
+            else:
+                lsform[i]=0
         return matrixform,lsform
     
     def generator(self,t):
         for Q,bath in zip(self.Qs,self.baths):
-            jumps=self.jump_operators(Q,t)
+            jumps=self.jump_operators(Q)
             ws=list(jumps.keys())
             combinations=list(itertools.product(ws, ws))
             matrices,lsform=self.matrix_form(jumps,combinations)
             # uno,dos,tres=self.matrix_form(jumps,combinations)
             a=[]
             for i in combinations:
+                gamma=self.gamma_gen(bath,i[0],i[1],t)
                 # f=1j*(self.gamma_gen(bath,i[0],i[1],t)* matrices[i] + self.gamma_gen(bath,i[0],i[1],t).conj()* lsform[i])/2
-                working=self.gamma_gen(bath,i[0],i[1],t)* matrices[i] + self.gamma_gen(bath,i[0],i[1],t).conj()* lsform[i]
+                working=gamma.real* matrices[i] + 1j*gamma.imag* lsform[i]
+                #working=self.gamma_gen(bath,i[0],i[1],t)* matrices[i]
                 # ff=(self.gamma_gen(bath,i[0],i[1],t).conj()+self.gamma_gen(bath,i[1],i[0],t))*uno
                 # pre=self.gamma_gen(bath,i[0],i[1],t).conj()*tres
                 # post=self.gamma_gen(bath,i[1],i[0],t)*dos
                 a.append( working )  
             kk=  sum(a)
+            # change this for first plus HC, check if still correct results, in transport and damped jc
+            # TODO: make tests 
             try:
                 return 1j*(spre(self.Hsys(t))-spost(self.Hsys(t))) +kk.conj()
             except:

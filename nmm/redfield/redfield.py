@@ -148,10 +148,7 @@ class redfield:
         if isinstance(t, type(jnp.array([2]))):
             t = np.array(t.tolist())
         if self.matsubara:
-            if w == w1:
-                return self.decayww(bath, w, t)
-            else:
-                return self.decayww2(bath, w, w1, t)
+            return self.decayww2(bath, w, w1, t)
 
         integrals = quad_vec(
             self._gamma,
@@ -159,9 +156,9 @@ class redfield:
             np.inf,
             args=(bath, w, w1, t),
             points=[-w, -w1, w, w1],
-            epsabs=self.eps,
             epsrel=self.eps,
-            quadrature="gk15"
+            epsabs=1e-9,              
+            quadrature="gk21"
         )[0]
         if self.picture=="I":
             return integrals *np.exp(1j*(w-w1)*t) #
@@ -278,11 +275,11 @@ class redfield:
             ws = list(jumps.keys())
             combinations = list(itertools.product(ws, ws))
             matrices,lsform = self.matrix_form(jumps, combinations)
-            decays = self.decays(combinations, bath, self.t)    
+            decays = self.decays(combinations, bath, self.t)   
             superop = []
             if self._qutip:
                 if self.ls is True:
-                    LS= self.LS(combinations,bath,self.t)            
+                    LS= self.LS(combinations,bath,self.t)       
                     gen = (LS[i]*np.array(lsform[i]) + np.array(matrices[i])*decays[i] for i in combinations)
                 else:
                     gen = (np.array(matrices[i])*decays[i] for i in combinations)
@@ -338,7 +335,7 @@ class redfield:
             # Handle both scalar and vector t
             if np.isscalar(t):
                 # Single time point
-                return csr_matrix(self.interpolated_generator(t)) @ y
+                return (csr_matrix(self.interpolated_generator(t)) @ y)
             else:
                 # Vectorized case
                 # Compute matrix for each time point and apply to corresponding y
@@ -374,14 +371,9 @@ class redfield:
         else:
             return sum(result)#now in schrodinger
 
-    def _decayww(self, bath, w, t):
-        return self._decayww2(bath, w, w, t)
-
     def decayww2(self, bath, w, w1, t):
-        return self._decayww2(bath, w, w1, t)
+        return self._decayww2(bath, w1, w, t).conj()
 
-    def decayww(self, bath, w, t):
-        return self._decayww(bath, w, t)
     
     def _LS(self, bath, w,w1, t):
         cks=np.array([i.coefficient for i in bath.exponents])
@@ -392,11 +384,11 @@ class redfield:
             term2=np.conjugate(cks[i])/(np.conjugate(vks[i])+1j*w)
             term1*=(1-np.exp(-(vks[i]-1j*w1)*t))
             term2*=(1-np.exp(-(np.conjugate(vks[i])+1j*w)*t))
-            result.append(term2-term1)
+            result.append(term1-term2)
         if self.picture=="I":
-            return -sum(result)/2j *np.exp(1j*(w-w1)*t)
+            return sum(result)/2j *np.exp(1j*(w-w1)*t)
         else:
-            return -sum(result)/2j#now in schrodinger
+            return sum(result)/2j#now in schrodinger
     def LS(self, combinations, bath, t):
         rates = {}
         done = []
@@ -406,7 +398,7 @@ class redfield:
             if (j in done) & (i != j):
                 rates[i] = np.conjugate(rates[j])
             else:
-                rates[i] = self._LS(bath, i[0], i[1], t)
+                rates[i] = self._LS(bath, i[0], i[1], t).conj()
         return rates
 tree_util.register_pytree_node(
     redfield,
