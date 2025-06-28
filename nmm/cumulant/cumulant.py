@@ -458,12 +458,3 @@ tree_util.register_pytree_node(
     csolve,
     csolve._tree_flatten,
     csolve._tree_unflatten)
-# TODO Add Lamb-shift
-# TODO pictures
-# TODO better naming
-# TODO explain regularization issues
-# TODO make result object
-# TODO support Tensor Networks
-# Benchmark with the QuatumToolbox,jl based version
-# Habilitate double precision (Maybe single is good for now)
-# TODO Diffrax does not work unless one makes a pytree for Qobj apparently
