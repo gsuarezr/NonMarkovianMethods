@@ -2,7 +2,12 @@
 # $ conda create --name <env> --file <this file>
 # platform: linux-64
 
-
+jax
+numpy
+cython
 qutip
 tqdm
+jaxlib
+multipledispatch
+
 

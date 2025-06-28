@@ -1,19 +1,7 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0","cython",'numpy',
+        'scipy; python_version > "3.7"',
+        'jax',
+        'jaxlib',
+        'multipledispatch']
 build-backend = "setuptools.build_meta"
-
-[project]
-name = "nmm"
-version = "0.0.1"
-authors = [
-  { name="Gerardo Suarez", email="gerardo.suarez@phdstud.ug.edu.pl" },
-]
-description = "A small example package"
-readme = "README.md"
-requires-python = ">=3.7"
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
-]
-

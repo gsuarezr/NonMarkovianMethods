@@ -19,3 +19,8 @@ using
       primaryClass={quant-ph}
 }
 
+![Continuous Integration](https://github.com/mcditoos/NonMarkovianMethods/actions/workflows/continous_integration.yml/badge.svg)
+
+[![codecov](https://codecov.io/github/gsuarezr/NonMarkovianMethods/graph/badge.svg?token=80B4ABOUYR)](https://codecov.io/github/gsuarezr/NonMarkovianMethods)
+
+[![Documentation](https://github.com/gsuarezr/NonMarkovianMethods/actions/workflows/documentation.yml/badge.svg)](https://github.com/gsuarezr/NonMarkovianMethods/actions/workflows/documentation.yml)

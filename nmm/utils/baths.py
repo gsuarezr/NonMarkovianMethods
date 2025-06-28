@@ -1,4 +1,6 @@
+import jax.numpy as jnp
 import numpy as np
+from jax import jit
 
 
 class BosonicBath:
@@ -23,7 +25,7 @@ class BosonicBath:
         """
         if self.T == 0:
             return 0
-        if ν == 0:
+        if np.isclose(ν, 0).all():
             return 0
         return np.exp(-ν / self.T) / (1-np.exp(-ν / self.T))
 
@@ -38,37 +40,70 @@ class BosonicBath:
 
 
 class OhmicBath(BosonicBath):
-    def __init__(self, T, alpha, wc):
+    def __init__(self, T, coupling, cutoff):
         super().__init__(T)
-        self.alpha = alpha
-        self.wc = wc
+        self.coupling = coupling
+        self.cutoff = cutoff
+        self.label = "ohmic"
 
     def spectral_density(self, w):
         r"""
         It describes the spectral density of an Ohmic spectral density given by
-        
+
         $$ J(\omega)= \alpha \omega e^{-\frac{|\omega|}{\omega_{c}}} $$
-        
+
         Parameters
         ----------
         """
-        return self.alpha*w*np.exp(-abs(w)/self.wc)
+        return self.coupling*w*np.exp(-abs(w)/self.cutoff)
 
     def correlation_function(self, t):
         return None
 
 
 class OverdampedBath(BosonicBath):
-    def __init__(self, T, lam, gamma):
+    def __init__(self, T, coupling, cutoff):
         super().__init__(T)
-        self.lam = lam
-        self.gamma = gamma
+        self.coupling = coupling
+        self.cutoff = cutoff
+        self.label = "overdamped"
+        self.params = np.array([coupling, cutoff], dtype=np.float64)
 
     def spectral_density(self, w):
-        return 2*self.lam*self.gamma*w/(self.gamma**2 + w**2)
+        return 2*self.coupling*self.cutoff*w/(self.cutoff**2 + w**2)
 
-    def correlation_function(self, t):
-        return None
+    def _vk(self, k):
+        if k == 0:
+            return self.cutoff
+        else:
+            return 2*np.pi*k*self.T
+
+    def _ckr(self, k):
+        c, d = self.coupling, self.cutoff
+        if k == 0:
+            return c*d/np.tan(d/(2*self.T))
+        else:
+            vk = self._vk(k)
+            return 4*c*d*vk*self.T/(vk**2 - d**2)
+
+    def vk(self, k):
+        return np.array([self._vk(i) for i in range(k)])
+
+    def _cki(self, k):
+        if k == 0:
+            return -self.coupling*self.cutoff
+        else:
+            return 0
+
+    def ckr(self, k):
+        return np.array([self._ckr(i) for i in range(k)])
+
+    def cki(self, k):
+        return np.array([self._cki(i) for i in range(k)])
+
+    def correlation_function(self, t, n=1000):
+        return (self.ckr(n)+1j*self.cki(n))*np.exp(-(self.vkr(n)
+                                                     + 1j*self.vki(n))*t)
 
 
 class UnderdampedBath(BosonicBath):
@@ -76,7 +111,7 @@ class UnderdampedBath(BosonicBath):
         super().__init__(T)
 
     def spectral_density(self, w):
-        return super().spectral_density(w)
+        return
 
     def correlation_function(self, t):
         return super().correlation_function(t)
