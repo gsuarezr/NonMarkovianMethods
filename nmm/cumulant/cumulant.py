@@ -269,7 +269,10 @@ class csolve:
         empty = 0*self.Hsys
         for keys, values in eldict.items():
             if not (values == empty):
-                dictrem[keys] = values.to("CSR")
+                if isinstance(values,qutip_Qobj):
+                    dictrem[keys] = values.to("CSR")
+                else:
+                    dictrem[keys] = values
         return dictrem
 
     def decays(self, combinations, bath, approximated):
@@ -397,21 +400,15 @@ class csolve:
 
     def decayww2(self, bath, w, w1, t):
         t_array = np.asarray(t)
-        # Get the result from the original calculation
         result = self._decayww2(bath, w,w1, t_array)
-        # Find where t is zero
         zero_indices = np.where(t_array == 0)
-        # Set the result to 0 at those indices
         result[zero_indices] = 0
         return result
 
     def decayww(self, bath, w, t):
         t_array = np.asarray(t)
-        # Get the result from the original calculation
         result = self._decayww(bath, w, t_array)
-        # Find where t is zero
         zero_indices = np.where(t_array == 0)
-        # Set the result to 0 at those indices
         result[zero_indices] = 0
         return result
 
