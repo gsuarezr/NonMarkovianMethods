@@ -29,7 +29,7 @@ def init():
     t = np.linspace(0, 1000, 10)
     T=1
     bath=nmm.OhmicBath(T,alpha,gamma)
-    obj = nmm.cumulant.csolve(Hsys,t ,[bath], [Q],cython=False)
+    obj = nmm.cumulant.csolve(Hsys,t ,[bath], [Q],cython=False,matsubara=False)
     return obj
 
 
