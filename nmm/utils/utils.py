@@ -3,29 +3,21 @@ from jax.scipy.linalg import expm
 from numbers import Number
 from jax import tree_util
 from jax import jit,Array
-import functools # Import functools for partial
 
 class Qobj:
     def __init__(self, op: jnp.array):
         self.data = op
-        # Store shape/dtype in aux_data if they are truly static
-        # For now, deriving them on the fly is fine.
         self.shape = op.shape
         self.dtype = op.dtype
 
     def _tree_flatten(self):
         children = (self.data,)
-        # aux_data could potentially store shape/dtype if they
-        # are guaranteed *not* to change in ways JAX can't track.
-        # For simple cases, leaving it empty is fine.
         aux_data = {}
         return (children, aux_data)
 
     @classmethod
     def _tree_unflatten(cls, aux_data, children):
         return cls(*children, **aux_data)
-
-    # --- JIT-able Methods ---
 
     def __add__(self, other):
 
@@ -51,8 +43,16 @@ class Qobj:
              return self
          else:
              raise TypeError(f"Not Implemented for {type(other)}")
+         
+    def __rsub__(self, other):
+         if isinstance(other, Qobj):
+             return Qobj(self.data - other.data)
+         if other == 0:
+             return -1*self
+         else:
+             raise TypeError(f"Not Implemented for {type(other)}")
 
-    @jit # No static args needed if only operating on self.data
+    @jit 
     def dag(self):
         return Qobj(jnp.conjugate(jnp.transpose(self.data)))
 
@@ -67,7 +67,17 @@ class Qobj:
 
         else:
              raise TypeError(f"Multiplication not defined for {type(other)}")
+        
+    def __rmul__(self, other):
+        if isinstance(other, Number):
+            return Qobj(self.data * other)
+        elif isinstance(other, Array):
+            return Qobj(self.data * other)
+        elif isinstance(other, Qobj):
+            return Qobj(self.data @ other.data)
 
+        else:
+             raise TypeError(f"Multiplication not defined for {type(other)}")
 
     def __truediv__(self, other):
          if isinstance(other, Number):
@@ -80,9 +90,9 @@ class Qobj:
         return Qobj(expm(self.data))
     @jit
     def eigenstates(self):
-         eigvals, eigvecs= jnp.linalg.eigh(self.data)
-         #eigvecs = [Qobj(eigvecs_matrix[:, i:i+1]) for i in range(eigvecs_matrix.shape[1])]
-         return eigvals, Qobj(eigvecs)
+         eigvals, eigvecs_matrix= jnp.linalg.eigh(self.data)
+         eigvecs = [Qobj(eigvecs_matrix[:, i:i+1]) for i in range(eigvecs_matrix.shape[1])]
+         return eigvals, eigvecs
 
     def __eq__(self, other):
          return jnp.isclose(self.data, other.data).all().item()

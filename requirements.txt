@@ -5,7 +5,7 @@
 jax
 numpy
 cython
-qutip
+qutip>5.1
 tqdm
 jaxlib
 multipledispatch

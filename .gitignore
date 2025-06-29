@@ -4,3 +4,4 @@ nmm.egg-info
 build
 dist
 nmm/*.ipynb
+**/__pycache__/

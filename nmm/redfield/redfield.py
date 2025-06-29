@@ -9,9 +9,7 @@ from nmm.utils.utils import spost as jax_spost
 from nmm.utils.utils import Qobj as jax_Qobj
 import itertools
 from collections import defaultdict
-from nmm.cumulant.cum import bath_csolve
 from multipledispatch import dispatch
-import warnings
 from scipy.integrate import solve_ivp
 from jax import tree_util
 from scipy.interpolate import interp1d
@@ -85,11 +83,8 @@ class redfield:
         return 1 / (np.exp(w / bath.T)-1)
     def _gamma(self, nu, bath, w, w1, t):
         r"""
-        It describes the Integrand of the decay rates of the cumulant equation
+        It describes the Integrand of the decay rates of the Redfield equation
         for bosonic baths
-
-        $$\Gamma(w,w',t)=\int_{0}^{t} dt_1 \int_{0}^{t} dt_2
-        e^{i (w t_1 - w' t_2)} \mathcal{C}(t_{1},t_{2})$$
 
         Parameters:
         ----------
@@ -107,7 +102,6 @@ class redfield:
             with energies w and w1 at time t
 
         """
-        #Refactor this to avoid the poles, using the standard Redfield definitions
         self._mul = 1/np.pi
         var = 1j*bath.spectral_density(nu)*self.bose(
             nu,bath)*(1-np.exp(1j*t*(w+nu)))/(w+nu)
@@ -121,15 +115,9 @@ class redfield:
 
     def _gamma_gen(self, bath, w, w1, t):
         r"""
-        It describes the the decay rates of the cumulant equation
+        It describes the the decay rates of the Redfield equation
         for bosonic baths
 
-        $$\Gamma(\omega,\omega',t) = t^{2}\int_{0}^{\infty} d\omega 
-        e^{i\frac{\omega-\omega'}{2} t} J(\omega) \left[ (n(\omega)+1) 
-        sinc\left(\frac{(\omega-\omega)t}{2}\right)
-        sinc\left(\frac{(\omega'-\omega)t}{2}\right)+ n(\omega) 
-        sinc\left(\frac{(\omega+\omega)t}{2}\right) 
-        sinc\left(\frac{(\omega'+\omega)t}{2}\right)   \right]$$
 
         Parameters
         ----------
@@ -161,11 +149,10 @@ class redfield:
             quadrature="gk21"
         )[0]
         if self.picture=="I":
-            return integrals *np.exp(1j*(w-w1)*t) #
+            return integrals *np.exp(1j*(w-w1)*t) # remove rotation so that it is in schrodinger
         else:
             return integrals
-    #remove rotation 
-    #so that it is in the schrodinger picture
+
 
     def jump_operators(self, Q):
         evals, all_state = self.Hsys.eigenstates()
@@ -306,12 +293,8 @@ class redfield:
         rho0 : numpy.ndarray or qutip.Qobj
             The initial state of the quantum system under consideration.
 
-        approximated : bool
-            When False the full cumulant equation/refined weak coupling is
-            computed, when True the Filtered Approximation (FA is computed),
-            this greatly reduces computational time, at the expense of
-            diminishing accuracy particularly for the populations of the system
-            at early times.
+        Method : string
+            The method to be used by scipy's solve_ivp
 
         Returns
         -------
@@ -319,26 +302,14 @@ class redfield:
             a list containing all of the density matrices, at all timesteps of
             the evolution
         """
-        # be easility jitted
-        # try:
-        #     y0=rho0.data.flatten()
-        #     y0=np.array(y0).astype(np.complex128)
-        #     f=lambda t,y: np.array(self.generator(t).data)@np.array(y) #maybe this can
-        # except:
         y0 = rho0.full().flatten()
         y0 = np.array(y0).astype(np.complex128)
-        # def f(t, y): return self.generator(
-        #     t).full()@np.array(y)  # maybe this can
         self.prepare_interpolated_generators()
 
         def f(t, y):
-            # Handle both scalar and vector t
             if np.isscalar(t):
-                # Single time point
                 return (csr_matrix(self.interpolated_generator(t)) @ y)
             else:
-                # Vectorized case
-                # Compute matrix for each time point and apply to corresponding y
                 return np.array([
                     csr_matrix(self.interpolated_generator(ti)) @ yi 
                     for ti, yi in zip(t, y.T)
@@ -405,14 +376,4 @@ tree_util.register_pytree_node(
     redfield._tree_flatten,
     redfield._tree_unflatten)
 
-# TODO Add Lamb-shift
-# TODO pictures
-# TODO better naming
-# TODO explain regularization issues
-# TODO make result object
-# TODO support Tensor Networks
-# Benchmark with the QuatumToolbox,jl based version
-# TODO catch warning from scipy
-# Habilitate double precision (Maybe single is good for now)
-# TODO CHECK Interpolation bits and how this is working in practice, there seems
-# to be some issues
+
