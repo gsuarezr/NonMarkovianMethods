@@ -38,14 +38,13 @@ def spost(op):
 
 
 class csolve:
-    def __init__(self, Hsys, t, baths, Qs, eps=1e-4, cython=True, limit=50,
-                 matsubara=False, ps=0,ls=False):
+    def __init__(self, Hsys, t, baths, Qs, eps=1e-4, cython=False, limit=50,
+                 matsubara=True,ls=False):
         self.Hsys = Hsys
         self.t = t
         self.eps = eps
         self.limit = limit
         self.dtype = Hsys.dtype
-        self.ps = ps
         self.ls=ls
 
         if isinstance(Hsys, qutip_Qobj):
