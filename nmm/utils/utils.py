@@ -43,6 +43,14 @@ class Qobj:
              return self
          else:
              raise TypeError(f"Not Implemented for {type(other)}")
+         
+    def __rsub__(self, other):
+         if isinstance(other, Qobj):
+             return Qobj(self.data - other.data)
+         if other == 0:
+             return -1*self
+         else:
+             raise TypeError(f"Not Implemented for {type(other)}")
 
     @jit 
     def dag(self):

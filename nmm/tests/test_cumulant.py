@@ -35,23 +35,23 @@ def init():
 
 class TestCumulant:
     @pytest.mark.parametrize("ars,expected",
-                             [((1, 2, 3), (0.0628+0.8859j)),
+                             [((1, 2, 3), (0.0628+0.8859j)/np.pi),
                               ((1, 2, 0), 0 + 0j),
-                              ((1.05, 0.095, 2), (0.3599 - 0.5087j))])
+                              ((1.05, 0.095, 2), (0.3599 - 0.5087j)/np.pi)])
     def test_gammafa(self, init, ars, expected):
         assert np.isclose(init.gamma_fa(init.baths[0],*ars), expected, atol=1e-3)
 
     @pytest.mark.parametrize("ars,expected",
-                             [((1, 2, 3, 4), (0.0023 + 0.0051j)),
+                             [((1, 2, 3, 4), (0.0023 + 0.0051j)/np.pi),
                               ((0, 0, 0, 5), 0 + 0j),
-                              ((1.05, 0.095, 2, 1), (0.0433-0.0610j))])
+                              ((1.05, 0.095, 2, 1), (0.0433-0.0610j)/np.pi)])
     def test_gamma(self, init, ars, expected):
         assert np.isclose(init._gamma_(ars[0],init.baths[0],*ars[1:]), expected, atol=1e-3)
 
     @pytest.mark.parametrize("ars,expected",
-                             [((1, 1, [2]), (0.7490)),
-                              ((1, -1, [2]), (-0.1119+0.2445j)),
-                              ((-1, -1, [2]), (0.3618))])
+                             [((1, 1, 2), (0.23844052)),
+                              ((1, -1, 2), -0.03562+0.07784j),
+                              ((-1, -1, [2]), (0.115165))])
     def test_gammagen(self, init, ars, expected):
         assert np.isclose(init.gamma_gen(init.baths[0],*ars), expected, atol=1e-3).all()
     @pytest.mark.parametrize("Hsys,Q",[(sz,sx),(sz,sz),(sz,sz+sx),(Hsys,Q1)])

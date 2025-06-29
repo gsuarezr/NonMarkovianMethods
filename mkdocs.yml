@@ -18,10 +18,7 @@ nav:
 - NonMarkovianMethods Documentation: index.md
 - API reference: api.md
 - Example 1: example_qutip.ipynb
-- Example 2: Qubit_example.ipynb
-- Example 3: transport_example.ipynb
-- Example 4: kerr_example.ipynb
-- Example 5: damped_jc.ipynb
+- Example 2 : Qubit_example.ipynb
 - Theory: theory.md
 
 markdown_extensions:

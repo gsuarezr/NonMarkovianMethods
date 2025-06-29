@@ -118,7 +118,7 @@ class csolve:
             with energies w and w1 at time t
 
         """
-        var = (2 * np.pi * t * np.exp(1j * (w1 - w) * t / 2)
+        var = (2 * t * np.exp(1j * (w1 - w) * t / 2)
                * np.sinc((w1 - w) * t / (2 * np.pi))
                * np.sqrt(bath.spectral_density(w1) * (self.bose(w1,bath) + 1))
                * np.sqrt(bath.spectral_density(w) * (self.bose(w,bath) + 1)))
@@ -197,6 +197,8 @@ class csolve:
         """
         if isinstance(t, type(jnp.array([2]))):
             t = np.array(t.tolist())
+        if isinstance(t, list):
+            t = np.array(t)
         if approximated:
             return self.gamma_fa(bath, w, w1, t)
         if self.matsubara:
