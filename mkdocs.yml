@@ -1,4 +1,5 @@
 site_name: Non-Markovian Methods
+site_url: https://gsuarezr.github.io/NonMarkovianMethods/
 
 theme:
   name: "material"
