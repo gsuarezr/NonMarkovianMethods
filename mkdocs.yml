@@ -21,7 +21,7 @@ nav:
 - Example 2 : Qubit_example.ipynb
 - Example 3: transport_example.ipynb
 - Example 4: kerr_example.ipynb 
-- Example 5: dampled_kc.ipynb
+- Example 5: damped_jc.ipynb
 
 markdown_extensions:
   - pymdownx.arithmatex:
