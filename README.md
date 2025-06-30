@@ -26,6 +26,20 @@ using
    year={2024},
    month=oct }
 ```
+The other examples come from 
+
+```bibtex 
+@misc{suárez2025makingnonmarkovianmasterequations,
+      title={Making Non-Markovian master equations accessible with approximate environments}, 
+      author={Gerardo Suárez and Micha\l{} Horodecki},
+      year={2025},
+      eprint={2506.22346},
+      archivePrefix={arXiv},
+      primaryClass={quant-ph},
+      url={https://arxiv.org/abs/2506.22346}, 
+}
+```
+
 Many features of this code depend on QuTiP's enviroment class, see the 
 [documentation and tutorials](https://qutip.readthedocs.io/en/latest/guide/guide-environments.html) 
 to get familiar with it.
