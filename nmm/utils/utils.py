@@ -251,7 +251,8 @@ class spost:
             return spost(data,kron=False)
     def expm(self):
         return spost(expm(self.data),kron=False)
-    
+
+
 tree_util.register_pytree_node(
     Qobj,
     Qobj._tree_flatten,

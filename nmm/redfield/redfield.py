@@ -15,7 +15,7 @@ from jax import tree_util
 from scipy.interpolate import interp1d
 import time
 from scipy.sparse import csr_matrix
-
+from nmm.utils.generators import GKLS
 @dispatch(qutip_Qobj)
 def spre(op):
     return qutip_spre(op)
@@ -36,11 +36,10 @@ def spost(op):
     return jax_spost(op)
 
 
-class redfield:
+class redfield(GKLS):
     def __init__(self, Hsys, t, baths, Qs, eps=1e-4, matsubara=True,
                  ls=True,picture="I"):
-        self.Hsys = Hsys
-        self.t = t
+        super().__init__(Hsys,t,Qs)
         self.eps = eps
         self.ls=ls
         self.picture = picture
@@ -153,9 +152,12 @@ class redfield:
         else:
             return integrals
 
+    def jump_operators(self, Q,t=None):
+        try:
+            evals, all_state = self.Hsys(t).eigenstates()
+        except:
+            evals, all_state = self.Hsys.eigenstates()
 
-    def jump_operators(self, Q):
-        evals, all_state = self.Hsys.eigenstates()
         N = len(all_state)
         collapse_list = []
         ws = []
@@ -186,7 +188,7 @@ class redfield:
         ws.append(0)
         output = defaultdict(list)
         for k, key in enumerate(ws):
-            output[np.round(key, 12)].append(collapse_list[k])
+            output[jnp.round(key, 12).item()].append(collapse_list[k])
         eldict = {x: sum(y) for x, y in output.items()}
         dictrem = {}
         empty = 0*self.Hsys
@@ -222,13 +224,7 @@ class redfield:
     def prepare_interpolated_generators(self):
         print("Started integration and Generator Calculations")
         start=time.time()
-
-        try:
-            generators = self.generators
-        except:
-            self.generator()
-            generators = np.array([i.full().flatten()
-                                  for i in self.generators])
+        generators = [self.generator(i) for i in self.t]
         print("Finished integration and Generator Calculations")
         end=time.time()
         print(f"Computation Time:{end-start}")
@@ -255,18 +251,18 @@ class redfield:
                                 for interp in self.interpolated_generators])
         return interpolated.reshape(self.generator_shape)
 
-    def generator(self):
+    def generator(self,t):
         generators = []
         for Q, bath in zip(self.Qs, self.baths):
-            jumps = self.jump_operators(Q)
+            jumps = self.jump_operators(Q,t)
             ws = list(jumps.keys())
             combinations = list(itertools.product(ws, ws))
             matrices,lsform = self.matrix_form(jumps, combinations)
-            decays = self.decays(combinations, bath, self.t)   
+            decays = self.decays(combinations, bath, t)   
             superop = []
             if self._qutip:
                 if self.ls is True:
-                    LS= self.LS(combinations,bath,self.t)       
+                    LS= self.LS(combinations,bath,t)       
                     gen = (LS[i]*np.array(lsform[i]) + np.array(matrices[i])*decays[i] for i in combinations)
                 else:
                     gen = (np.array(matrices[i])*decays[i] for i in combinations)
@@ -279,10 +275,12 @@ class redfield:
             del decays
         generate = sum(generators)
         if self.picture=="I":
-            self.generators = generate
+            return generate
         else:
-            self.generators=[i+1j*(spre(self.Hsys)-spost(self.Hsys)) for i in generate]
-
+            try:
+                return generate+1j*(spre(self.Hsys(t))-spost(self.Hsys(t))) 
+            except:
+                return generate+1j*(spre(self.Hsys)-spost(self.Hsys))  
     def evolution(self, rho0, method="RK45"):
         r"""
         This function computes the evolution of the state $\rho(0)$
@@ -304,14 +302,14 @@ class redfield:
         """
         y0 = rho0.full().flatten()
         y0 = np.array(y0).astype(np.complex128)
-        self.prepare_interpolated_generators()
+        #self.prepare_interpolated_generators()
 
         def f(t, y):
             if np.isscalar(t):
-                return (csr_matrix(self.interpolated_generator(t)) @ y)
+                return (csr_matrix(self.generator(t).full()) @ y)
             else:
                 return np.array([
-                    csr_matrix(self.interpolated_generator(ti)) @ yi 
+                    csr_matrix(self.generator(ti).full()) @ yi 
                     for ti, yi in zip(t, y.T)
                 ]).T
         start=time.time()
