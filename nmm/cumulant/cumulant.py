@@ -69,27 +69,6 @@ class csolve(GKLS):
     @classmethod
     def _tree_unflatten(cls, aux_data, children):
         return cls(*children, **aux_data)
-    def bose(self,w,bath):
-        r"""
-        It computes the Bose-Einstein distribution
-
-        $$ n(\omega)=\frac{1}{e^{\beta \omega}-1} $$
-
-        Parameters:
-        ----------
-        nu: float
-            The mode at which to compute the thermal population
-
-        Returns:
-        -------
-        float
-            The thermal population of mode nu
-        """
-        if bath.T == 0:
-            return 0
-        if np.isclose(w, 0).all():
-            return 0
-        return np.exp(-w / bath.T) / (1-np.exp(-w / bath.T))
     
     def gamma_fa(self, bath, w, w1, t):
         r"""
@@ -168,7 +147,7 @@ class csolve(GKLS):
     
         return var
 
-    def gamma_gen(self, bath, w, w1, t, approximated=False):
+    def _gamma_gen(self, bath, w, w1, t, approximated=False):
         r"""
         It describes the the decay rates of the cumulant equation
         for bosonic baths
@@ -218,21 +197,7 @@ class csolve(GKLS):
                 epsrel=self.eps,
                 quadrature="gk21"
             )[0]
-            return t*t*integrals
-        
-    def decays(self, combinations, bath, approximated):
-        rates = {}
-        done = []
-        for i in tqdm(combinations, desc='Calculating Integrals ...',
-                      dynamic_ncols=True):
-            done.append(i)
-            j = (i[1], i[0])
-            if (j in done) & (i != j):
-                rates[i] = np.conjugate(rates[j])
-            else:
-                rates[i] = self.gamma_gen(bath, i[0], i[1], self.t,
-                                          approximated)
-        return rates
+            return t*t*integrals    
 
     def generator(self, approximated=False):
         generators = []
@@ -240,7 +205,7 @@ class csolve(GKLS):
             jumps = self.jump_operators(Q)
             ws = list(jumps.keys())
             combinations = list(itertools.product(ws, ws))
-            rates = self.decays(combinations, bath, approximated)
+            rates = self.decays(combinations, bath ,approximated,self.t)
             matrices,lsform = self.matrix_form(jumps, combinations)
             if self.ls is False:
                 superop = sum(

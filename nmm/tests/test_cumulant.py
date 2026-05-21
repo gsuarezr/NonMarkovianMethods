@@ -5,6 +5,9 @@ import nmm
 import qutip as qt
 import jax
 jax.config.update("jax_enable_x64", True)
+
+
+
 sz=nmm.Qobj(jnp.array([[1, 0], [0, -1]],dtype=jnp.complex128))
 sx=nmm.Qobj(jnp.array([[0, 1], [1, 0]],dtype=jnp.complex128))
 sy=nmm.Qobj(jnp.array([[0, -1j], [0, 1j]],dtype=jnp.complex128))
@@ -54,6 +57,17 @@ class TestCumulant:
                               ((-1, -1, [2]), (0.115165))])
     def test_gammagen(self, init, ars, expected):
         assert np.isclose(init.gamma_gen(init.baths[0],*ars), expected, atol=1e-3).all()
+    @pytest.mark.parametrize("Hsys,Q",[(sz,sx),(sz,sz),(sz,sz+sx),(Hsys,Q1)])
+    def test_jump_operators(self,init,Hsys,Q):
+        init.Hsys=Hsys
+        jumps=init.jump_operators(Q)
+        if (commutator(init.Hsys,Q) == 0*init.Hsys):
+            assert len(jumps)==1
+            assert list(jumps.keys())[0]==0
+        else:
+            for key,value in jumps.items():
+                assert jnp.isclose(commutator(init.Hsys,value).data,(-key*value).data).all()
+                assert commutator(init.Hsys,value.dag()*value)==0*value
     @pytest.mark.parametrize("Hsys,Q",[(sz,sx),(sz,sz),(sz,sz+sx),(Hsys,Q1)])
     def test_jump_operators(self,init,Hsys,Q):
         init.Hsys=Hsys

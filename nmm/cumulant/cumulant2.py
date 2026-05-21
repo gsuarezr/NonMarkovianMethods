@@ -217,11 +217,7 @@ class csolve2:
 
 
     def jump_operators(self, Q,t=None):
-        try:
-            evals, all_state = self.Hsys(t).eigenstates()
-        except:
-            evals, all_state = self.Hsys.eigenstates()
-
+        evals, all_state = self.Hsys(t).eigenstates()
         N = len(all_state)
         collapse_list = []
         ws = []

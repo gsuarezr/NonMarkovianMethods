@@ -85,10 +85,9 @@ class Qobj:
          else:
              raise NotImplementedError("Ill defined Operation")
 
-    @jit
     def expm(self):
         return Qobj(expm(self.data))
-    @jit
+
     def eigenstates(self):
          eigvals, eigvecs_matrix= jnp.linalg.eigh(self.data)
          eigvecs = [Qobj(eigvecs_matrix[:, i:i+1]) for i in range(eigvecs_matrix.shape[1])]
@@ -117,8 +116,8 @@ class spre:
         else:
             self.data=op
             self.dim = int(op.shape[0]**0.5)
-        ## it may be worth using tensor contractions here (einsum)
         self.func = lambda x: Qobj((self.data@x.data.reshape(self.dim**2)).reshape(self.dim, self.dim))
+
     def _tree_flatten(self):
         children=(self.data,)
         aux_data={"kron":self.kron}
@@ -183,6 +182,7 @@ class spre:
             raise NotImplementedError("Ill defined Operation")
     def expm(self):
         return spre(expm(self.data),kron=False)
+        
 class spost:
     def __init__(self, op,kron=True):
         if kron:

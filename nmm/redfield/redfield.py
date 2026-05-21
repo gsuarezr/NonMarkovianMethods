@@ -11,11 +11,13 @@ import itertools
 from collections import defaultdict
 from multipledispatch import dispatch
 from scipy.integrate import solve_ivp
-from jax import tree_util
+from jax import tree_util,vmap
 from scipy.interpolate import interp1d
 import time
 from scipy.sparse import csr_matrix
 from nmm.utils.generators import GKLS
+from diffrax import diffeqsolve,PIDController, ODETerm, SaveAt, Tsit5
+
 @dispatch(qutip_Qobj)
 def spre(op):
     return qutip_spre(op)
@@ -112,7 +114,7 @@ class redfield(GKLS):
             self.bose(nu,bath)+1)*(1-np.exp(1j*t*(w1-nu)))/(w1-nu)
         return (var2 + np.conjugate(var))*self._mul
 
-    def _gamma_gen(self, bath, w, w1, t):
+    def _gamma_gen(self, bath, w, w1, t,approximated):
         r"""
         It describes the the decay rates of the Redfield equation
         for bosonic baths
@@ -152,75 +154,6 @@ class redfield(GKLS):
         else:
             return integrals
 
-    def jump_operators(self, Q,t=None):
-        try:
-            evals, all_state = self.Hsys(t).eigenstates()
-        except:
-            evals, all_state = self.Hsys.eigenstates()
-
-        N = len(all_state)
-        collapse_list = []
-        ws = []
-        for j in range(N):
-            for k in range(j + 1, N):
-                Deltajk = evals[k] - evals[j]
-                ws.append(Deltajk)
-                collapse_list.append(
-                    (
-                        all_state[j]
-                        * all_state[j].dag()
-                        * Q
-                        * all_state[k]
-                        * all_state[k].dag()
-                    )
-                )  # emission
-                ws.append(-Deltajk)
-                collapse_list.append(
-                    (
-                        all_state[k]
-                        * all_state[k].dag()
-                        * Q
-                        * all_state[j]
-                        * all_state[j].dag()
-                    )
-                )  # absorption
-        collapse_list.append(Q - sum(collapse_list))  # Dephasing
-        ws.append(0)
-        output = defaultdict(list)
-        for k, key in enumerate(ws):
-            output[jnp.round(key, 12).item()].append(collapse_list[k])
-        eldict = {x: sum(y) for x, y in output.items()}
-        dictrem = {}
-        empty = 0*self.Hsys
-        for keys, values in eldict.items():
-            if not (values == empty):
-                dictrem[keys] = values.to("CSR")
-        return dictrem
-
-    def decays(self, combinations, bath, t):
-        rates = {}
-        done = []
-        for i in combinations:
-            done.append(i)
-            j = (i[1], i[0])
-            if (j in done) & (i != j):
-                rates[i] = np.conjugate(rates[j])
-            else:
-                rates[i] = self._gamma_gen(bath, i[1], i[0], t)
-        return rates
-
-    def matrix_form(self, jumps, combinations):
-        matrixform = {}
-        lsform= {}
-        for i in combinations:
-            ada=jumps[i[0]].dag()*jumps[i[1]]
-            matrixform[i] = (
-                spre(jumps[i[1]]) * spost(jumps[i[0]].dag()) - 1 *
-                (0.5 *
-                (spre(ada) +spost(ada))))
-            lsform[i]= 1j*(spre(ada)-spost(ada))
-        return matrixform,lsform
-
     def prepare_interpolated_generators(self):
         print("Started integration and Generator Calculations")
         start=time.time()
@@ -251,19 +184,19 @@ class redfield(GKLS):
                                 for interp in self.interpolated_generators])
         return interpolated.reshape(self.generator_shape)
 
-    def generator(self,t):
+    def generator(self,t,approximated=False):
         generators = []
         for Q, bath in zip(self.Qs, self.baths):
             jumps = self.jump_operators(Q,t)
             ws = list(jumps.keys())
             combinations = list(itertools.product(ws, ws))
             matrices,lsform = self.matrix_form(jumps, combinations)
-            decays = self.decays(combinations, bath, t)   
+            decays = self.decays(combinations, bath, approximated, t)   
             superop = []
             if self._qutip:
                 if self.ls is True:
                     LS= self.LS(combinations,bath,t)       
-                    gen = (LS[i]*np.array(lsform[i]) + np.array(matrices[i])*decays[i] for i in combinations)
+                    gen = (LS[i]*np.array(lsform[i])+ np.array(matrices[i])*decays[i]  for i in combinations)
                 else:
                     gen = (np.array(matrices[i])*decays[i] for i in combinations)
             else:
@@ -300,30 +233,67 @@ class redfield(GKLS):
             a list containing all of the density matrices, at all timesteps of
             the evolution
         """
-        y0 = rho0.full().flatten()
-        y0 = np.array(y0).astype(np.complex128)
-        #self.prepare_interpolated_generators()
+        if isinstance(rho0,jax_Qobj):
 
-        def f(t, y):
-            if np.isscalar(t):
-                return (csr_matrix(self.generator(t).full()) @ y)
-            else:
-                return np.array([
-                    csr_matrix(self.generator(ti).full()) @ yi 
-                    for ti, yi in zip(t, y.T)
-                ]).T
-        start=time.time()
-        print("Started Solving the differential equation")
-        result = solve_ivp(f, [0, self.t[-1]],
-                           y0,
-                           t_eval=self.t, method=method,vectorized=True)
-        n = self.Hsys.shape[0]
-        states = [result.y[:, i].reshape(n, n)
-                  for i in range(len(self.t))]
-        print("Finished Solving the differential equation")
-        end=time.time()
-        print(f"Computation Time:{end-start}")
-        return states
+            y0 = rho0.data.flatten()
+
+            def f(t, y, args):
+                return self.generator(t) @ y
+
+            term = ODETerm(f)
+            
+            # SaveAt allows us to evaluate at exactly the time points in self.t
+            saveat = SaveAt(ts=self.t)
+            
+            print("Started Solving with Diffrax")
+            start = time.time()
+            
+            # 4. Run the integration
+            sol = diffeqsolve(
+                term,
+                Tsit5(),
+                t0=self.t[0],
+                t1=self.t[-1],
+                dt0=0.01, # Initial step size guess
+                y0=y0,
+                saveat=saveat,
+                stepsize_controller=PIDController(rtol=self.eps, atol=self.eps)
+            )
+            
+            # 5. Reshape the results back to density matrices
+            # sol.ys has shape (num_timesteps, n*n)
+            n = self.Hsys.shape[0]
+            states = jax.vmap(lambda y: y.reshape(n, n))(sol.ys)
+            
+            end = time.time()
+            print(f"Finished. Computation Time: {end - start}")
+
+            return states
+        else:
+            y0 = rho0.full().flatten()
+            y0 = np.array(y0).astype(np.complex128)
+            #self.prepare_interpolated_generators()
+
+            def f(t, y):
+                if np.isscalar(t):
+                    return (csr_matrix(self.generator(t).full()) @ y)
+                else:
+                    return np.array([
+                        csr_matrix(self.generator(ti).full()) @ yi 
+                        for ti, yi in zip(t, y.T)
+                    ]).T
+            start=time.time()
+            print("Started Solving the differential equation")
+            result = solve_ivp(f, [0, self.t[-1]],
+                            y0,
+                            t_eval=self.t, method=method,vectorized=True)
+            n = self.Hsys.shape[0]
+            states = [result.y[:, i].reshape(n, n)
+                    for i in range(len(self.t))]
+            print("Finished Solving the differential equation")
+            end=time.time()
+            print(f"Computation Time:{end-start}")
+            return states
 
     def _decayww2(self,bath, w, w1, t):
         cks=np.array([i.coefficient for i in bath.exponents])
@@ -369,6 +339,7 @@ class redfield(GKLS):
             else:
                 rates[i] = self._LS(bath, i[0], i[1], t).conj()
         return rates
+
 tree_util.register_pytree_node(
     redfield,
     redfield._tree_flatten,

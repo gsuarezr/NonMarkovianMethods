@@ -29,6 +29,7 @@ def spre(op):
 @dispatch(jax_Qobj)
 def spost(op):
     return jax_spost(op)
+
 class GKLS:
     def __init__(self, Hsys, t, Qs):
         self.Hsys = Hsys
@@ -93,7 +94,7 @@ class GKLS:
                 dictrem[keys] = values
         return dictrem
 
-    def decays(self, combinations, bath, t):
+    def decays(self, combinations, bath,approximated, t):
         rates = {}
         done = []
         for i in combinations:
@@ -102,7 +103,7 @@ class GKLS:
             if (j in done) & (i != j):
                 rates[i] = np.conjugate(rates[j])
             else:
-                rates[i] = self._gamma_gen(bath, i[1], i[0], t)
+                rates[i] = self._gamma_gen(bath, i[1], i[0], t, approximated)
         return rates
     def matrix_form(self, jumps, combinations):
         matrixform = {}
@@ -115,7 +116,28 @@ class GKLS:
                 (spre(ada) +spost(ada))))
             lsform[i]= 1j*(spre(ada)-spost(ada))
         return matrixform,lsform
+        
+    def bose(self,w,bath):
+        r"""
+        It computes the Bose-Einstein distribution
 
+        $$ n(\omega)=\frac{1}{e^{\beta \omega}-1} $$
+
+        Parameters:
+        ----------
+        nu: float
+            The mode at which to compute the thermal population
+
+        Returns:
+        -------
+        float
+            The thermal population of mode nu
+        """
+        if bath.T == 0:
+            return 0
+        if np.isclose(w, 0).all():
+            return 0
+        return np.exp(-w / bath.T) / (1-np.exp(-w / bath.T))
 
 
 tree_util.register_pytree_node(
