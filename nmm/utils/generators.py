@@ -1,9 +1,10 @@
 import jax.numpy as jnp
 from jax import tree_util
-
+from collections import defaultdict 
+import numpy as np
 class GKLS:
     def __init__(self, Hsys, t, Qs):
-        self.Hsys = Hsys.data
+        self.Hsys = Hsys
         self.Qs = [Q.data for Q in Qs ] 
 
     def _tree_flatten(self):
@@ -37,46 +38,46 @@ class GKLS:
             return 0
         return jnp.exp(-w / bath.T) / (1-jnp.exp(-w / bath.T))
 
-    def jump_operators(self, Q, t=None):
-        # 1. Get Eigenvalues and Eigenvectors
-        H_matrix = self.Hsys.data
-        evals, evecs = jnp.linalg.eigh(H_matrix)
-        # 2. Transform Q to energy basis
-        Q_data = Q.data 
-        Q_eb = jnp.conj(evecs.T) @ Q_data @ evecs
-        # 3. Create frequency matrix 
-        bohr_frequencies = evals[None, :] - evals[ :, None]
-        # 4. Round and find unique frequencies, Here is where a partial secular 
-        # approximation would take place
-        ws= bohr_frequencies.flatten()
-        ws_rounded = jnp.round(ws, 12)
-        # Get unique frequencies and an index mapping
-        # size=n**2 ensures the output shape is static
-        unique_ws, inverse_indices = jnp.unique(
-            ws_rounded, return_inverse=True, size=self.n**2, fill_value=0.0
-        )
-        # 5. Group and Sum operators with the same frequency
-        summed_amplitudes = jax.ops.segment_sum(
-            Q_eb.flatten(), 
-            inverse_indices, 
-            num_segments=self.n**2
-        )
-
-        # 6. Reconstruct the Operators 
-        def get_single_op(i):
-            # Create a sparse-like matrix in energy basis for this specific frequency
-            # Each index k where inverse_indices[k] == i belongs to this frequency
-            mask = (inverse_indices == i).reshape(self.n, self.n)
-            op_eb = jnp.where(mask, Q_eb, 0.0)
-            # Transform back from the energy basis: A_w = U @ op_eb @ U.dag
-            return evecs @ op_eb @ jnp.conj(evecs.T)
-
-        # Vmap over the number of unique frequencies
-        all_summed_operators = jax.vmap(get_single_op)(jnp.arange(self.n**2))
-        
-        # unique_ws: array of frequencies (the keys)
-        # all_summed_operators: 3D array of matrices (the values)
-        return unique_ws, all_summed_operators
+    def jump_operators(self, Q,t=None):
+        evals, all_state = self.Hsys.eigenstates()
+        N = len(all_state)
+        collapse_list = []
+        ws = []
+        for j in range(N):
+            for k in range(j + 1, N):
+                Deltajk = evals[k] - evals[j]
+                ws.append(Deltajk)
+                collapse_list.append(
+                    (
+                        all_state[j]
+                        * all_state[j].dag()
+                        * Q
+                        * all_state[k]
+                        * all_state[k].dag()
+                    )
+                )  # emission
+                ws.append(-Deltajk)
+                collapse_list.append(
+                    (
+                        all_state[k]
+                        * all_state[k].dag()
+                        * Q
+                        * all_state[j]
+                        * all_state[j].dag()
+                    )
+                )  # absorption
+        collapse_list.append(Q - sum(collapse_list))  # Dephasing
+        ws.append(0)
+        output = defaultdict(list)
+        for k, key in enumerate(ws):
+            output[np.round(key, 12).item()].append(collapse_list[k])
+        eldict = {x: sum(y) for x, y in output.items()}
+        dictrem = {}
+        empty = 0*self.Hsys
+        for keys, values in eldict.items():
+            if not (values == empty):
+                dictrem[keys] = values.to("CSR")
+        return dictrem
 
     def _generator_jax(self, Q , bath, t):
             # 1. Setup Basis and extract clean JAX arrays
