@@ -6,3 +6,4 @@ dist
 nmm/*.ipynb
 **/__pycache__/
 site
+optimizations*

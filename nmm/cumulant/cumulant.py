@@ -16,6 +16,7 @@ from multipledispatch import dispatch
 import warnings
 from jax import tree_util
 from nmm.utils.generators import GKLS
+from tqdm import tqdm
 
 
 @dispatch(qutip_Qobj)
@@ -40,12 +41,14 @@ def spost(op):
 
 class csolve(GKLS):
     def __init__(self, Hsys, t, baths, Qs, eps=1e-4, cython=False, limit=50,
-                 matsubara=True,ls=False):
+                 matsubara=True,ls=False,picture="I"):
         super().__init__(Hsys,t,Qs)
         self.eps = eps
         self.limit = limit
         self.dtype = Hsys.dtype
         self.ls=ls
+        self.picture = picture
+        self.t  = t 
 
         if isinstance(Hsys, qutip_Qobj):
             self._qutip = True

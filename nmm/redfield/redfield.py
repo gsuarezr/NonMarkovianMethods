@@ -52,6 +52,7 @@ class redfield(GKLS):
         self.baths = baths
         self.Qs = Qs
         self.matsubara = matsubara
+        self.t = t 
     def _tree_flatten(self):
         children = (self.Hsys, self.t, self.eps,
                     self.limit, self.baths, self.dtype)

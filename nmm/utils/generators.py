@@ -2,6 +2,35 @@ import jax.numpy as jnp
 from jax import tree_util
 from collections import defaultdict 
 import numpy as np
+from tqdm import tqdm
+from qutip import spre as qutip_spre
+from qutip import spost as qutip_spost
+from qutip import Qobj as qutip_Qobj
+from nmm.utils.utils import spre as jax_spre
+from nmm.utils.utils import spost as jax_spost
+from nmm.utils.utils import Qobj as jax_Qobj
+from multipledispatch import dispatch
+
+@dispatch(qutip_Qobj)
+def spre(op):
+    return qutip_spre(op)
+
+
+@dispatch(qutip_Qobj)
+def spost(op):
+    return qutip_spost(op)
+
+
+@dispatch(jax_Qobj)
+def spre(op):
+    return jax_spre(op)
+
+
+@dispatch(jax_Qobj)
+def spost(op):
+    return jax_spost(op)
+
+
 class GKLS:
     def __init__(self, Hsys, t, Qs):
         self.Hsys = Hsys
@@ -152,7 +181,30 @@ class GKLS:
         for Q, bath in zip(self.Qs, self.baths):
             total_generator += self._generator_jax(Q, bath, t)
         return total_generator
+    def matrix_form(self, jumps, combinations):
+        matrixform = {}
+        lsform={}
+        for i in combinations:
+            ada=jumps[i[0]].dag() * jumps[i[1]]
+            matrixform[i] = (
+                spre(jumps[i[1]]) * spost(jumps[i[0]].dag()) - 1 *
+                (0.5 *
+                 (spre(ada) +spost(ada))))
+            lsform[i]= -1j*(spre(ada)-spost(ada))
 
+        return matrixform,lsform
+    def decays(self, combinations, bath, approximated,t):
+        rates = {}
+        done = []
+        for i in combinations:
+            done.append(i)
+            j = (i[1], i[0])
+            if (j in done) & (i != j):
+                rates[i] = np.conjugate(rates[j])
+            else:
+                rates[i] = self._gamma_gen(bath, i[0], i[1], t,
+                                          approximated)
+        return rates
 tree_util.register_pytree_node(
 GKLS,
 GKLS._tree_flatten,
