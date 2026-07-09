@@ -40,7 +40,7 @@ def spost(op):
 
 class redfield(GKLS):
     def __init__(self, Hsys, t, baths, Qs, eps=1e-4, matsubara=True,
-                 ls=True,picture="I"):
+                 ls=True,picture="I",markov=False):
         super().__init__(Hsys,t,Qs)
         self.eps = eps
         self.ls=ls
@@ -53,6 +53,8 @@ class redfield(GKLS):
         self.Qs = Qs
         self.matsubara = matsubara
         self.t = t 
+        self.markov = markov
+
     def _tree_flatten(self):
         children = (self.Hsys, self.t, self.eps,
                     self.limit, self.baths, self.dtype)
@@ -307,12 +309,18 @@ class redfield(GKLS):
             term2*=(1-np.exp(-(np.conjugate(vks[i])+1j*w)*t))
             result.append(term1+term2)
         if self.picture=="I":
-            return sum(result) *np.exp(1j*(w-w1)*t)
+            if self.markov: 
+                return (bath.power_spectrum(w) + bath.power_spectrum(w1)) * np.exp(1j * (w - w1) * t)
+            else:
+                return sum(result) *np.exp(1j*(w-w1)*t)
         else:
-            return sum(result)#now in schrodinger
+            if self.markov: 
+                return (bath.power_spectrum(w) + bath.power_spectrum(w1))
+            else:
+                return sum(result)
 
     def decayww2(self, bath, w, w1, t):
-        return self._decayww2(bath, w1, w, t).conj()
+        return self._decayww2(bath, w1, w, t)
 
     
     def _LS(self, bath, w,w1, t):
@@ -326,9 +334,16 @@ class redfield(GKLS):
             term2*=(1-np.exp(-(np.conjugate(vks[i])+1j*w)*t))
             result.append(term1-term2)
         if self.picture=="I":
-            return sum(result)/2j *np.exp(1j*(w-w1)*t)
+            if self.markov: 
+                return (bath.power_spectrum(w) - bath.power_spectrum(w1))/(2j) * np.exp(1j * (w - w1) * t)
+            else:
+                return sum(result)/2j *np.exp(1j*(w-w1)*t)
         else:
-            return sum(result)/2j#now in schrodinger
+            if self.markov: 
+                return (bath.power_spectrum(w) - bath.power_spectrum(w1))/(2j)
+            else:
+                return sum(result)/2j
+
     def LS(self, combinations, bath, t):
         rates = {}
         done = []
@@ -338,7 +353,7 @@ class redfield(GKLS):
             if (j in done) & (i != j):
                 rates[i] = np.conjugate(rates[j])
             else:
-                rates[i] = self._LS(bath, i[0], i[1], t).conj()
+                rates[i] = np.conjugate(self._LS(bath, i[0], i[1], t))
         return rates
 
 tree_util.register_pytree_node(

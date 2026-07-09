@@ -748,7 +748,7 @@ JAXGKLS2._tree_unflatten)
 
 
 class JAXGKLS3:
-    def __init__(self, Hsys, t, baths, Qs, picture="S", LS=True):
+    def __init__(self, Hsys, t, baths, Qs, picture="S", LS=True,markov=False):
         self.Hsys = Hsys
         self.t = t
         self.Qs = Qs        
@@ -756,7 +756,7 @@ class JAXGKLS3:
         self.n = Hsys.data.shape[1]
         self.picture = picture
         self.LS = LS
-
+        self.markov = markov
     def _tree_flatten(self):
         children = (self.Hsys, self.t, self.Qs)
         aux_data = {}
@@ -778,16 +778,29 @@ class JAXGKLS3:
         omega_flat = omega_matrix.flatten()
 
         static_bath_data = []
+        max_K = max(len(bath.exponents) for bath in self.baths)
         for Q, bath in zip(self.Qs, self.baths):
             Q_orig = Q.data
             Q_eb = jnp.conj(evecs.T) @ Q_orig @ evecs
 
-            cks = jnp.array([i.coefficient for i in bath.exponents], dtype=jnp.complex128)
-            vks = jnp.array([i.exponent for i in bath.exponents], dtype=jnp.complex128)
+            # 2. Extract original arrays
+            cks_orig = jnp.array([i.coefficient for i in bath.exponents], dtype=jnp.complex128)
+            vks_orig = jnp.array([i.exponent for i in bath.exponents], dtype=jnp.complex128)
+            
+            # 3. Pad cks and vks with zeros up to max_K
+            pad_len = max_K - len(bath.exponents)
+            cks = jnp.pad(cks_orig, (0, pad_len), mode='constant', constant_values=0j)
+            vks = jnp.pad(vks_orig, (0, pad_len), mode='constant', constant_values=0j)
 
             # Precompute static denominators
-            t1_denom = vks[None, :] - 1j * omega_flat[:, None]      # (n^2, K)
-            t2_denom = jnp.conj(vks)[None, :] + 1j * omega_flat[:, None] # (n^2, K)
+            t1_denom = vks[None, :] - 1j * omega_flat[:, None]      # (n^2, max_K)
+            t2_denom = jnp.conj(vks)[None, :] + 1j * omega_flat[:, None] # (n^2, max_K)
+
+            # 4. Handle division-by-zero safety for the padded elements (where vks=0 and omega_flat=0)
+            # Since cks is 0 for padded positions, any non-nan/non-inf value in denom preserves correctness.
+            # We can use jnp.where to guard denominators against absolute 0.
+            t1_denom = jnp.where(t1_denom == 0, 1.0, t1_denom)
+            t2_denom = jnp.where(t2_denom == 0, 1.0, t2_denom)
 
             term1_static = cks[None, :] / t1_denom
             term2_static = jnp.conj(cks)[None, :] / t2_denom
@@ -798,10 +811,111 @@ class JAXGKLS3:
                 'term1_static': term1_static,
                 'term2_static': term2_static
             })
-
-        # Stack into a single PyTree of arrays
+            
         stacked_bath_data = jax.tree_util.tree_map(lambda *xs: jnp.stack(xs), *static_bath_data)
         return evecs, omega_matrix, evals, stacked_bath_data
+
+    # @functools.partial(jax.jit, static_argnums=(0,))
+    # def evolution(self, rho0, t):
+    #     # 1. Precompute static/basis transformation elements
+    #     evecs, omega_matrix, evals, static_bath_data = self._precompute_static_baths()
+
+    #     # 2. Rotate initial state to energy basis (matching original L_right layout)
+    #     rho0_eb = evecs.T @ rho0.data @ jnp.conj(evecs)
+    #     # 3. Define the derivative in energy basis (shape: (n, n))
+    #     def system_model_eb(t_val, rho_eb, args):
+    #         drho_dt = jnp.zeros_like(rho_eb)
+
+    #         # Precompute exp(1j * evals * t_val) and exp_omega
+    #         e_val = jnp.exp(1j * evals * t_val)
+    #         E_phase = e_val[None, :] * jnp.conj(e_val[:, None]) # E_phase[j, k] = e_val[k] * conj(e_val[j])
+    #         exp_omega = E_phase.flatten()
+
+    #         if self.picture == "I":
+    #             E = E_phase
+    #             conj_phase = jnp.conj(exp_omega)[:, None] * exp_omega[None, :]
+    #         else:
+    #             E = jnp.ones((self.n, self.n), dtype=jnp.complex128)
+    #             # Hamiltonian term
+    #             if self.picture == "S":
+    #                 drho_dt += 1j * omega_matrix * rho_eb
+
+    #         # Accumulate contributions from each Q / bath
+    #         for data in args:
+    #             Q_eb = data['Q_eb']
+    #             vks = data['vks']
+    #             term1_static = data['term1_static']
+    #             term2_static = data['term2_static']
+
+    #             # Compute time-dependent exponentials in factorized form
+    #             exp_vks = jnp.exp(-vks * t_val)
+    #             exp1 = 1.0 - exp_omega[:, None] * exp_vks[None, :]
+    #             exp2 = 1.0 - jnp.conj(exp_omega)[:, None] * jnp.conj(exp_vks)[None, :]
+
+    #             # Sum over bath exponents
+    #             S1 = jnp.sum(term1_static * exp1, axis=-1)  # (n^2,)
+    #             S2 = jnp.sum(term2_static * exp2, axis=-1)  # (n^2,)
+
+    #             # Reshape S1 and S2 to (n, n)
+    #             G2 = jnp.conj(S2.reshape(self.n, self.n))
+    #             G1 = jnp.conj(S1.reshape(self.n, self.n))
+
+    #             # Apply time-dependent phases
+    #             G2_prime = G2 * jnp.conj(E)
+    #             G1_prime = G1 * E
+
+    #             # Form intermediate matrix products
+    #             X1 = E * Q_eb
+    #             X2 = G1_prime * Q_eb
+    #             Y1 = G2_prime * jnp.conj(Q_eb.T)
+    #             Y2 = jnp.conj(E) * jnp.conj(Q_eb.T)
+
+    #             # Compute rate matrix M_eb = Y1.T @ X1 + Y2.T @ X2
+    #             M_eb = Y1.T @ X1 + Y2.T @ X2
+
+    #             # Anticommutator part: -0.5 * (M_eb.T @ rho_eb + rho_eb @ M_eb.T)
+    #             drho_dt -= 0.5 * (M_eb.T @ rho_eb + rho_eb @ M_eb.T)
+
+    #             # Sandwich part: Y1 @ rho_eb @ X1.T + Y2 @ rho_eb @ X2.T
+    #             drho_dt += Y1 @ rho_eb @ X1.T + Y2 @ rho_eb @ X2.T
+
+    #             # Lamb shift part
+    #             if self.LS:
+    #                 G2_ls = G2 / 2j
+    #                 G1_ls = G1 / (-2j)
+    #                 G2_prime_ls = G2_ls * jnp.conj(E)
+    #                 G1_prime_ls = G1_ls * E
+                    
+    #                 Y1_ls = G2_prime_ls * jnp.conj(Q_eb.T)
+    #                 X2_ls = G1_prime_ls * Q_eb
+    #                 S_matrix = Y1_ls.T @ X1 + Y2.T @ X2_ls
+
+    #                 drho_dt += 1j * (S_matrix.T @ rho_eb - rho_eb @ S_matrix.T)
+
+    #         return drho_dt
+
+    #     # 4. Solve the Diffeq in the energy basis
+    #     physics_term = diffrax.ODETerm(system_model_eb)
+    #     solver = diffrax.Tsit5()
+    #     stepsize_controller = diffrax.PIDController(rtol=1e-8, atol=1e-8)
+
+    #     sol = diffrax.diffeqsolve(
+    #         physics_term,
+    #         solver,
+    #         t0=t[0],
+    #         t1=t[-1],
+    #         dt0=t[1] - t[0],
+    #         y0=rho0_eb,  # Passes matrix y0 directly (Diffrax supports PyTree/matrix states!)
+    #         saveat=diffrax.SaveAt(ts=t),
+    #         max_steps=1_000_000_000,
+    #         stepsize_controller=stepsize_controller,
+    #         args=static_bath_data
+    #     )
+
+    #     # 5. Rotate the entire solution trajectory back to the original basis
+    #     # sol.ys has shape (num_steps, n, n)
+    #     rho_trajectory = jax.vmap(lambda r_eb: jnp.conj(evecs) @ r_eb @ evecs.T)(sol.ys)
+    #     return rho_trajectory
 
     @functools.partial(jax.jit, static_argnums=(0,))
     def evolution(self, rho0, t):
@@ -835,15 +949,18 @@ class JAXGKLS3:
                 vks = data['vks']
                 term1_static = data['term1_static']
                 term2_static = data['term2_static']
-
+                if self.markov is True:
+                    # When markov is True, the power spectrum is the coeffient,
+                    S1 = jnp.sum(term1_static, axis=-1).real  # (n^2,)
+                    S2 = jnp.sum(term2_static, axis=-1).real  # (n^2,)
+                else:
                 # Compute time-dependent exponentials in factorized form
-                exp_vks = jnp.exp(-vks * t_val)
-                exp1 = 1.0 - exp_omega[:, None] * exp_vks[None, :]
-                exp2 = 1.0 - jnp.conj(exp_omega)[:, None] * jnp.conj(exp_vks)[None, :]
-
-                # Sum over bath exponents
-                S1 = jnp.sum(term1_static * exp1, axis=-1)  # (n^2,)
-                S2 = jnp.sum(term2_static * exp2, axis=-1)  # (n^2,)
+                    exp_vks = jnp.exp(-vks * t_val)
+                    exp1 = 1.0 - exp_omega[:, None] * exp_vks[None, :]
+                    exp2 = 1.0 - jnp.conj(exp_omega)[:, None] * jnp.conj(exp_vks)[None, :]
+                    # Sum over bath exponents
+                    S1 = jnp.sum(term1_static * exp1, axis=-1)  # (n^2,)
+                    S2 = jnp.sum(term2_static * exp2, axis=-1)  # (n^2,)
 
                 # Reshape S1 and S2 to (n, n)
                 G2 = jnp.conj(S2.reshape(self.n, self.n))
@@ -913,7 +1030,7 @@ class JAXGKLS3:
         # 4. Solve the Diffeq in the energy basis
         physics_term = diffrax.ODETerm(system_model_eb)
         solver = diffrax.Tsit5()
-        stepsize_controller = diffrax.PIDController(rtol=1e-8, atol=1e-8)
+        stepsize_controller = diffrax.PIDController(rtol=1e-12, atol=1e-12)
 
         sol = diffrax.diffeqsolve(
             physics_term,
@@ -932,7 +1049,6 @@ class JAXGKLS3:
         # sol.ys has shape (num_steps, n, n)
         rho_trajectory = jax.vmap(lambda r_eb: jnp.conj(evecs) @ r_eb @ evecs.T)(sol.ys)
         return rho_trajectory
-
 tree_util.register_pytree_node(
 JAXGKLS3,
 JAXGKLS3._tree_flatten,
